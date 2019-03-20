@@ -20,5 +20,7 @@ class DeployStackAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        success, result = deploy_stack(obj)
-        return Response(result, status=200 if success else 500)
+        message, result = deploy_stack(obj)
+        return Response(
+            {"message": message, "logs": result}, status=200 if message == "" else 500
+        )

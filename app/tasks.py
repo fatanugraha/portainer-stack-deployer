@@ -12,7 +12,7 @@ class PortainerAPI:
         self.logs = []
 
     def log_response(self, r, *args, **kwargs):
-        self.logs.append({"url": r.url, "result": r.json()})
+        self.logs.append({"url": r.url, "result": r.text})
 
     def login(self, username, password):
         r = self.request.post(
@@ -158,7 +158,7 @@ def deploy_stack(stack):
         controller.delete_resource_control()
         controller.create_stack()
         controller.create_resource_control()
-    except Exception:
-        return False, controller.api.logs
+    except Exception as e:
+        return str(e), controller.api.logs
 
-    return True, controller.api.logs
+    return "", controller.api.logs

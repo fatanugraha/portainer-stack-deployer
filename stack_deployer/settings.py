@@ -31,7 +31,7 @@ PORTAINER_USERNAME = os.getenv("PORTAINER_USERNAME")
 PORTAINER_PASSWORD = os.getenv("PORTAINER_PASSWORD")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DJANGO_ENV", "local") == "local"
 
 ALLOWED_HOSTS = []
 
