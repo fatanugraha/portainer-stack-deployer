@@ -159,6 +159,6 @@ def deploy_stack(stack):
         controller.create_stack()
         controller.create_resource_control()
     except Exception:
-        pass
+        return False, controller.api.logs
 
-    return controller.api.logs
+    return True, controller.api.logs

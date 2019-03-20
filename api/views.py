@@ -20,5 +20,5 @@ class DeployStackAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        result = deploy_stack(obj)
-        return Response(result, status=result.status_code)
+        success, result = deploy_stack(obj)
+        return Response(result, status=200 if success else 500)
