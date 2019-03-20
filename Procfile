@@ -1,1 +1,1 @@
-web: gunicorn myproject.wsgi
+web: gunicorn log_generator.wsgi
