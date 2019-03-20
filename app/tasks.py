@@ -4,124 +4,157 @@ import json
 import base64
 
 
-def login():
-    username = settings.PORTAINER_USERNAME
-    password = settings.PORTAINER_PASSWORD
+class PortainerAPI:
+    def __init__(self, base_url):
+        self.base_url = base_url
+        self.request = requests.Session()
+        self.request.hooks = {"response": self.log_response}
+        self.logs = []
 
-    r = requests.post(
-        settings.PORTAINER_URL + "/auth",
-        data=json.dumps({"username": username, "password": password}),
-    )
+    def log_response(self, r, *args, **kwargs):
+        self.logs.append({"url": r.url, "result": r.json()})
 
-    if r.status_code == 200:
-        jwt = r.json()["jwt"]
-        user = jwt.split(".")[1] + "===="  # add base64 padding
-        return jwt, json.loads(base64.b64decode(user))
-
-    raise Exception(r.text)
-
-
-auth_token, user = login()
-
-
-def delete_stack(stack):
-
-    if stack.stack_id:
-        r = requests.delete(
-            settings.PORTAINER_URL
-            + "/stacks/{}?endpointId=1&external=false".format(stack.stack_id),
-            headers={"Authorization": "Bearer %s" % auth_token},
+    def login(self, username, password):
+        r = self.request.post(
+            self.base_url + "/auth",
+            data=json.dumps({"username": username, "password": password}),
         )
 
-        if r.status_code != 204:
-            raise Exception(r.text)
-        print(r.text)
+        if r.status_code == 200:
+            self.jwt = r.json()["jwt"]
+            self.user = json.loads(base64.b64decode(self.jwt.split(".")[1] + "=="))
+            self.request.headers.update({"Authorization": "Bearer {}".format(self.jwt)})
 
-        stack.unset_meta("stack_id")
+        return r
 
-    if stack.resource_control_id:
-        r = requests.delete(
-            settings.PORTAINER_URL
-            + "/resource_controls/{}".format(stack.resource_control_id),
-            headers={"Authorization": "Bearer %s" % auth_token},
+    def delete_stack(self, stack_id):
+        url = self.base_url + "/stacks/{}?endpointId=1&external=false".format(stack_id)
+        return self.request.delete(url)
+
+    def delete_resource_control(self, resource_control_id):
+        url = self.base_url + "/resource_controls/{}".format(resource_control_id)
+        return self.request.delete(url)
+
+    def pull_image(self, image, tag):
+        url = (
+            self.base_url
+            + "/endpoints/1/docker/images/create?fromImage={}&tag={}".format(image, tag)
         )
+        return self.request.post(url, data=json.dumps({"fromImage": image, "tag": tag}))
 
+    def inspect_stack(self, stack_name):
+        url = (
+            self.base_url
+            + '/endpoints/1/docker/containers/json?all=1&filters={{"label":["com.docker.compose.project={}"]}}'.format(
+                stack_name
+            )
+        )
+        return self.request.get(url)
+
+    def create_stack(self, name, stack_file_content, env):
+        url = self.base_url + "/stacks?endpointId=1&method=string&type=2"
+        payload = {"Name": name, "StackFileContent": stack_file_content, "Env": env}
+        return self.request.post(url, data=json.dumps(payload))
+
+    def create_private_resource_control(self, resource_id):
+        url = self.base_url + "/resource_controls"
+        payload = {
+            "Type": "stack",
+            "Public": False,
+            "ResourceID": resource_id,
+            "Users": [self.user["id"]],
+            "Teams": [],
+            "SubResourceIDs": [],
+        }
+        return self.request.post(url, data=json.dumps(payload))
+
+
+class StackController:
+    def __init__(self, stack, portainer_api_base_url):
+        self.api = PortainerAPI(portainer_api_base_url)
+        self.stack = stack
+
+    def login(self, username, password, num_retries=10):
+        current_retries = 0
+        success = False
+
+        while current_retries < num_retries and not success:
+            r = self.api.login(username, password)
+            success = r.status_code == 200
+            current_retries += 1
+
+    def delete_stack(self):
+        if self.stack.stack_id is None:
+            return
+
+        r = self.api.delete_stack(self.stack.stack_id)
         if r.status_code != 204:
             raise Exception(r.text)
 
-        stack.unset_meta("resource_control_id")
+        self.stack.unset_meta("stack_id")
 
+    def delete_resource_control(self):
+        if self.stack.resource_control_id is None:
+            return
 
-def pull_image(image):
-    name, tag = image.split(":")
+        r = self.api.delete_resource_control(self.stack.resource_control_id)
+        if r.status_code != 204:
+            raise Exception(r.text)
 
-    r = requests.post(
-        settings.PORTAINER_URL
-        + ("/endpoints/1/docker/images/create?fromImage=%s&tag=%s" % (name, tag)),
-        headers={"Authorization": "Bearer %s" % auth_token},
-        data=json.dumps({"fromImage": name, "tag": tag}),
-    )
+        self.stack.unset_meta("resource_control_id")
 
-    if r.status_code != 200:
-        raise Exception(r.text)
+    def pull_stack_images(self):
+        if self.stack.stack_id is None:
+            return
 
-    print(r.text)
+        images = self.api.inspect_stack(self.stack.name).json()
 
+        for image in images:
+            image_name = image["Image"]
+            if "sha256" in image_name:
+                continue
 
-def renew_stack(stack):
-    r = requests.get(
-        settings.PORTAINER_URL
-        + '/endpoints/1/docker/containers/json?all=1&filters={"label":["com.docker.compose.project=%s"]}'
-        % stack.name,
-        headers={"Authorization": "Bearer %s" % auth_token},
-    )
+            name, tag = image_name.split(":")
+            self.api.pull_image(name, tag)
 
-    if r.status_code != 200:
-        raise Exception(r.text)
+    def create_stack(self):
+        if self.stack.stack_id:
+            return
 
-    images = [container["Image"] for container in r.json()]
-    print(images)
-    for image in images:
-        if "sha256" in image:  # already pulled
-            continue
-        pull_image(image)
+        env_lines = self.stack.environment_variable.split("\n")
+        envs = []
 
-    delete_stack(stack)
-    deploy_stack(stack)
+        for line in filter(lambda i: i.strip() != "", env_lines):
+            name, value = line.rstrip("\r").split("=")
+            envs.append({"name": name, "value": value})
+
+        r = self.api.create_stack(self.stack.name, self.stack.stack_file, envs)
+        if r.status_code != 200:
+            raise Exception(r.text)
+
+        self.stack.set_meta("stack_id", r.json()["Id"])
+
+    def create_resource_control(self):
+        if self.stack.resource_control_id:
+            return
+
+        r = self.api.create_private_resource_control(self.stack.name)
+        if r.status_code != 200:
+            raise Exception(r.text)
+
+        self.stack.set_meta("resource_control_id", r.json()["Id"])
 
 
 def deploy_stack(stack):
-    # create stack
-    if stack.stack_id is None:
-        r = requests.post(
-            settings.PORTAINER_URL + "/stacks?endpointId=1&method=string&type=2",
-            headers={"Authorization": "Bearer %s" % auth_token},
-            data=json.dumps(stack.serialize()),
-        )
+    controller = StackController(stack, "https://portainer.docker.ppl.cs.ui.ac.id/api")
+    try:
+        controller.login(settings.PORTAINER_USERNAME, settings.PORTAINER_PASSWORD)
+        controller.pull_stack_images()
+        controller.delete_stack()
+        controller.delete_resource_control()
+        controller.create_stack()
+        controller.create_resource_control()
+    except Exception:
+        pass
 
-        if r.status_code != 200:
-            raise Exception(r.text)
-
-        stack.set_meta("stack_id", r.json()["Id"])
-
-    # set stack permission to private
-    if stack.resource_control_id is None:
-        r = requests.post(
-            settings.PORTAINER_URL + "/resource_controls",
-            headers={"Authorization": "Bearer %s" % auth_token},
-            data=json.dumps(
-                {
-                    "Type": "stack",
-                    "Public": False,
-                    "ResourceID": stack.name,
-                    "Users": [user["id"]],
-                    "Teams": [],
-                    "SubResourceIDs": [],
-                }
-            ),
-        )
-
-        if r.status_code != 200:
-            raise Exception(r.text)
-
-        stack.set_meta("resource_control_id", r.json()["Id"])
+    return controller.api.logs
