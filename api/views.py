@@ -21,4 +21,4 @@ class DeployStackAPIView(APIView):
         serializer.save()
 
         result = deploy_stack(obj)
-        return Response(result.json(), status=result.status_code)
+        return Response(result, status=result.status_code)

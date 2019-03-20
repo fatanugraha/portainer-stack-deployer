@@ -91,7 +91,8 @@ class StackController:
         if r.status_code != 204:
             raise Exception(r.text)
 
-        self.stack.unset_meta("stack_id")
+        self.stack.stack_id = None
+        self.stack.save()
 
     def delete_resource_control(self):
         if self.stack.resource_control_id is None:
@@ -101,7 +102,8 @@ class StackController:
         if r.status_code != 204:
             raise Exception(r.text)
 
-        self.stack.unset_meta("resource_control_id")
+        self.stack.resource_control_id = None
+        self.stack.save()
 
     def pull_stack_images(self):
         if self.stack.stack_id is None:
@@ -132,7 +134,8 @@ class StackController:
         if r.status_code != 200:
             raise Exception(r.text)
 
-        self.stack.set_meta("stack_id", r.json()["Id"])
+        self.stack.stack_id = r.json()["Id"]
+        self.stack.save()
 
     def create_resource_control(self):
         if self.stack.resource_control_id:
@@ -142,7 +145,8 @@ class StackController:
         if r.status_code != 200:
             raise Exception(r.text)
 
-        self.stack.set_meta("resource_control_id", r.json()["Id"])
+        self.stack.resource_control_id = r.json()["Id"]
+        self.stack.save()
 
 
 def deploy_stack(stack):

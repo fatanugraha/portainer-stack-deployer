@@ -1,11 +1,4 @@
 from django.contrib import admin
-from app.models import Stack, Meta
+from app.models import Stack
 
-class MetaInlineAdmin(admin.TabularInline):
-    model = Meta
-    extra = 0
-
-class StackAdmin(admin.ModelAdmin):
-    inlines = [MetaInlineAdmin]
-
-admin.site.register(Stack, StackAdmin)
+admin.site.register(Stack)
