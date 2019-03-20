@@ -1,1 +1,1 @@
-web: gunicorn log_generator.wsgi
+web: gunicorn stack_deployer.wsgi
