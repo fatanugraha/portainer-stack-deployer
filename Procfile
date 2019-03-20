@@ -1,1 +1,1 @@
-web: gunicorn stack_deployer.wsgi
+web: gunicorn stack_deployer.wsgi --timeout 300
